@@ -1,16 +1,10 @@
 /*
-  Written by jackson murphy and the teaching staff of cs 4400.
+  Written by Jackson Murphy and the teaching staff of cs 4400.
 
-  
+  This is a dynamic storage allocator for C programs.
+  It provides 2 functions that are intended to replace the malloc()
+  and free() functions of the C standard library.
 
- * mm-naive.c - The least memory-efficient malloc package.
- *
- * In this naive approach, a block is allocated by allocating a
- * new page as needed.  A block is pure payload. There are no headers or
- * footers.  Blocks are never coalesced or reused.
- *
- * NOTE TO STUDENTS: Replace this header comment with your own header
- * comment that gives a high level description of your solution.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -21,6 +15,28 @@
 #include "mm.h"
 #include "memlib.h"
 
+typedef struct {
+  size_t size;
+  char allocated;
+} block_header;
+
+typedef struct {
+  size_t size;
+  int filler;
+} block_footer;
+
+typedef struct list_node {
+  struct list_node* next;
+  struct list_node* prev;
+} list_node;
+
+static void* first_bp = NULL;
+static list_node* first_free_bp = NULL;
+static void* bp = NULL;
+static void* current_avail = NULL;
+static int current_avail_size = 0;
+
+
 /* always use 16-byte alignment */
 #define ALIGNMENT 16
 
@@ -30,8 +46,18 @@
 /* rounds up to the nearest multiple of mem_pagesize() */
 #define PAGE_ALIGN(size) (((size) + (mem_pagesize()-1)) & ~(mem_pagesize()-1))
 
-void *current_avail = NULL;
-int current_avail_size = 0;
+#define OVERHEAD (sizeof(block_header) + sizeof(block_footer))
+#define HDRP(bp) ((char*) (bp) - sizeof(block_header))
+#define FTRP(bp) ((char*) (bp) + GET_SIZE(HDRP(bp)) - OVERHEAD)
+
+#define GET_SIZE(p) ((block_header*)(p))->size
+#define GET_ALLOC(p) ((block_header*)(p))->allocated
+
+#define NEXT_BLKP(bp) ((char*)(bp) + GET_SIZE(HDRP(bp)))
+#define PREV_BLKP(bp) ((char*)(bp) - GET_SIZE((char*)(bp) - OVERHEAD))
+
+static void check_heap_correctness(char* first_bp);
+
 
 /*
  * mm_init - initialize the malloc package.
@@ -64,6 +90,7 @@ void *mm_malloc(size_t size)
   current_avail += newsize;
   current_avail_size -= newsize;
 
+  //check_heap_correctness(first_bp);
   return p;
 }
 
@@ -72,4 +99,61 @@ void *mm_malloc(size_t size)
  */
 void mm_free(void *ptr)
 {
+  //check_heap_correctness(first_bp);
+}
+
+/* Internal test to ensure correct allocation */
+static void check_heap_correctness(char* first_bp){
+  if(GET_SIZE(HDRP(first_bp)) == 0)
+    exit(-1);
+
+  // Ensure there are no contiguous free blocks
+  void* bp = first_bp;
+  while(GET_SIZE(HDRP(bp)) != 0){
+    char curr_alloc = GET_ALLOC(HDRP(bp));
+    if(curr_alloc == 0 && GET_ALLOC(HDRP(NEXT_BLKP(bp))) == 0)
+      exit(-2);
+    bp = NEXT_BLKP(bp);
+  }
+
+  // Ensure all free blocks are also in free list
+  bp = first_bp;
+  size_t implicit_free_count = 0;
+  size_t explicit_free_count = 0;
+  while(GET_SIZE(HDRP(NEXT_BLKP(bp))) != 0){
+    if(GET_ALLOC(HDRP(bp)) == 0)
+      implicit_free_count++;
+    bp = NEXT_BLKP(bp);
+  }
+  if(GET_ALLOC(HDRP(bp)) == 0)
+    implicit_free_count++;
+
+  list_node* fp  = first_free_bp;
+  if(fp != NULL){
+    explicit_free_count++;
+    while(fp->next != NULL){
+      explicit_free_count++;
+      fp = fp->next;
+    }
+  }
+
+  if(explicit_free_count != implicit_free_count)
+    exit(-3);
+
+  // Ensure every block in free list is free, and is valid with size greater than 0
+   fp = first_free_bp;
+  while(fp != NULL){
+    if(GET_ALLOC(HDRP(fp)) != 0 || GET_SIZE(HDRP(fp)) <= 0)
+      exit(-4);
+    fp = fp->next;
+  }
+
+  // Ensure no allocated blocks overlap
+  bp = first_bp;
+  while(1){
+    if(bp + GET_SIZE(bp) != NEXT_BLKP(bp))
+      exit(-5);
+    if(GET_SIZE(NEXT_BLKP(bp)) == 0)
+      break;
+  }
 }
