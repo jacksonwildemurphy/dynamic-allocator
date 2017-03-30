@@ -1,0 +1,16 @@
+{
+  "uploadOnSave": true,
+  "useAtomicWrites": false,
+  "deleteLocal": false,
+  "hostname": "lab1-15.eng.utah.edu",
+  "port": "22",
+  "target": "/home/jmurphy/Documents/cs4400/HW6/malloclab-handout/",
+  "ignore": [
+    ".remote-sync.json",
+    ".git/**"
+  ],
+  "username": "jmurphy",
+  "password": "17!Psyche",
+  "watch": [],
+  "transport": "scp"
+}
