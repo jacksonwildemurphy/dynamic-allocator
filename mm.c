@@ -225,7 +225,7 @@ static void set_allocated(void* bp, size_t size){
 static void* set_new_chunk(size_t size){
   // Decide how many pages to call for
   size_t pages_requested = PAGE_ALIGN(size) / PAGE_SIZE;
-  size_t new_pages_requested = MAX(pages_requested, pages_in_use * 2);
+  size_t new_pages_requested = MAX(pages_requested, pages_in_use);
   pages_in_use += new_pages_requested;
   size_t new_size = new_pages_requested * PAGE_SIZE;
 
