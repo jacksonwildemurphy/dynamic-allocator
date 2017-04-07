@@ -47,9 +47,9 @@ static list_node* last_chunk_ptr = NULL;
 static size_t PAGE_SIZE;
 static size_t pages_in_use = 0;
 static size_t chunks_in_use = 0;
-static size_t INITIAL_PAGES = 2;
+static size_t INITIAL_PAGES = 1;
 // Only unmap a chunk when there are at least this many
-static size_t CHUNK_UNMAPPING_LIMIT = 100;
+static size_t CHUNK_UNMAPPING_LIMIT = 2;
 
 
 /* always use 16-byte alignment */
@@ -82,7 +82,6 @@ static void set_chunk_info(list_node* chunk_ptr, size_t size);
 static void set_start_terminator(list_node* chunk_ptr);
 static void set_end_terminator(list_node* chunk_ptr, size_t chunk_size);
 static void possibly_unmap_chunk(void* fp);
-static void unmap_all_pages();
 static void reset_vars();
 static void replace_list_node(list_node* new_node, list_node* old_node);
 static void remove_list_node(list_node* node);
@@ -113,14 +112,11 @@ void *mm_malloc(size_t size)
 {
   size_t need_size = MAX(size, sizeof(list_node));
   size_t new_size = ALIGN(need_size + BLOCK_OVERHEAD);
-  size_t overhead = BLOCK_OVERHEAD;
   list_node* fp = first_fp;
   list_node* best_fp = NULL; // For best-fit allocating
 
   if(first_fp){
     while(1){
-      size_t page_size = mem_pagesize();
-      size_t free_size = GET_SIZE(HDRP((void*)fp));
       if(GET_SIZE(HDRP((void*)fp)) >= new_size){
         if(!best_fp || GET_SIZE(HDRP((void*)fp)) < GET_SIZE(HDRP((void*)best_fp)))
           best_fp = fp;
@@ -215,7 +211,6 @@ static void set_allocated(void* bp, size_t size){
     // Fix free list pointers
     replace_list_node((list_node*)NEXT_BLKP(bp), (list_node*)bp);
 
-    size_t free_p_size = GET_SIZE(HDRP((void*)first_fp));
   }
   else{
     GET_ALLOC(HDRP(bp)) = 1;
@@ -326,27 +321,6 @@ static void possibly_unmap_chunk(void* fp){
   }
 }
 
-//
-static void unmap_all_pages(){
-  // Return early if there are no pages to unmap
-  if(!last_chunk_ptr)
-    return;
-
-  int pages_remain = 1;
-  list_node* to_delete_ptr;
-
-  while(pages_remain){
-    to_delete_ptr = last_chunk_ptr;
-    if(last_chunk_ptr->prev != 0)
-       last_chunk_ptr = last_chunk_ptr->prev;
-    else
-      pages_remain = 0;
-
-    chunk_info* info = to_delete_ptr + sizeof(list_node);
-    mem_unmap(to_delete_ptr, info->size);
-  }
-}
-
 /* Resets the allocator's static variables*/
 static void reset_vars(){
    first_bp = NULL;
@@ -356,6 +330,8 @@ static void reset_vars(){
    PAGE_SIZE = 0;
    pages_in_use = 0;
    chunks_in_use = 0;
+   CHUNK_UNMAPPING_LIMIT = 2;
+   INITIAL_PAGES = 2;
 }
 
 /* Replaces 1 doubly-linked list node with another */
