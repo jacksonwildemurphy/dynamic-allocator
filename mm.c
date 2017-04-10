@@ -39,17 +39,18 @@ typedef struct {
   int filler;
 } chunk_info;
 
-
-static void* first_bp = NULL;
-static list_node* first_fp = NULL;
-static void* bp = NULL;
-static list_node* last_chunk_ptr = NULL;
+// These vars are defined and initialized in reset_vars()
+static void* first_bp;
+static list_node* first_fp;
+static void* bp;
+static list_node* last_chunk_ptr;
 static size_t PAGE_SIZE;
-static size_t pages_in_use = 0;
-static size_t chunks_in_use = 0;
-static size_t INITIAL_PAGES = 1;
+static size_t pages_in_use;
+static size_t chunks_in_use;
+static size_t INITIAL_PAGES ;
+static size_t MAX_PAGES_IN_CHUNK;
 // Only unmap a chunk when there are at least this many
-static size_t CHUNK_UNMAPPING_LIMIT = 2;
+static size_t CHUNK_UNMAP_THRESHOLD;
 
 
 /* always use 16-byte alignment */
@@ -113,13 +114,13 @@ void *mm_malloc(size_t size)
   size_t need_size = MAX(size, sizeof(list_node));
   size_t new_size = ALIGN(need_size + BLOCK_OVERHEAD);
   list_node* fp = first_fp;
-  list_node* best_fp = NULL; // For best-fit allocating
+  list_node* sufficiently_large_fp = NULL; // For best-fit allocating
 
   if(first_fp){
     while(1){
       if(GET_SIZE(HDRP((void*)fp)) >= new_size){
-        if(!best_fp || GET_SIZE(HDRP((void*)fp)) < GET_SIZE(HDRP((void*)best_fp)))
-          best_fp = fp;
+          sufficiently_large_fp = fp;
+          break;
       }
       if(fp->next == NULL)
         break;
@@ -127,9 +128,9 @@ void *mm_malloc(size_t size)
     }
   }
 
-  if(best_fp){
-    set_allocated((void*)best_fp, new_size);
-    return (void*)best_fp;
+  if(sufficiently_large_fp){
+    set_allocated((void*)sufficiently_large_fp, new_size);
+    return (void*)sufficiently_large_fp;
   }
 
   // no free block big enough, or no free block at all
@@ -151,7 +152,7 @@ void mm_free(void* bp)
 
   // If the freed block was the only one in the chunk, unmap the chunk.
   // But not if it's the only chunk we've allocated so far.
-  if(chunks_in_use > CHUNK_UNMAPPING_LIMIT)
+  if(pages_in_use > CHUNK_UNMAP_THRESHOLD)
     possibly_unmap_chunk(fp);
 
   //check_heap_correctness(first_bp);
@@ -208,7 +209,7 @@ static void set_allocated(void* bp, size_t size){
     GET_ALLOC(HDRP(NEXT_BLKP(bp))) = 0;
     GET_ALLOC(HDRP((bp))) = 1;
 
-    // Fix free list pointers
+    // Adjust free list pointers
     replace_list_node((list_node*)NEXT_BLKP(bp), (list_node*)bp);
 
   }
@@ -226,6 +227,8 @@ static void* set_new_chunk(size_t size){
   // Decide how many pages to call for
   size_t pages_requested = PAGE_ALIGN(size) / PAGE_SIZE;
   size_t new_pages_requested = MAX(pages_requested, pages_in_use);
+  if(new_pages_requested > MAX_PAGES_IN_CHUNK)
+    new_pages_requested = MAX_PAGES_IN_CHUNK;
   pages_in_use += new_pages_requested;
   size_t new_size = new_pages_requested * PAGE_SIZE;
 
@@ -330,8 +333,9 @@ static void reset_vars(){
    PAGE_SIZE = 0;
    pages_in_use = 0;
    chunks_in_use = 0;
-   CHUNK_UNMAPPING_LIMIT = 2;
-   INITIAL_PAGES = 2;
+   CHUNK_UNMAP_THRESHOLD = 15;
+   INITIAL_PAGES = 1;
+   MAX_PAGES_IN_CHUNK = 32;
 }
 
 /* Replaces 1 doubly-linked list node with another */
