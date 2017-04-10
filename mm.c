@@ -1,13 +1,20 @@
 /*
-  Written by Jackson Murphy and the teaching staff of cs 4400.
+  Written by Jackson Murphy for CS4400 - Computer Systems.
+  Last modified on April 10, 2017.
 
   This is a dynamic storage allocator for C programs.
   It provides 2 functions that are intended to replace the malloc()
-  and free() functions of the C standard library.
+  and free() functions of the C standard library (mm_malloc and mm_free).
 
-  A note on terminology: the variable names bp and fp are often used.
+  The features of this allocator include an explicit free list,
+  coalescing of free blocks, and unmapping of free chunks of pages.
+
+  Notes on terminology:
+  The variable names bp and fp are often used.
   bp means "block pointer", and fp means "free block pointer".
 
+  A "chunk" is a page or group of pages returned by the operating system on a single call
+  to mem_map()
  */
 
 #include <stdio.h>
@@ -20,22 +27,23 @@
 #include "memlib.h"
 
 typedef struct {
-  size_t size;
-  char allocated;
+  size_t size; // the number of bytes in a block
+  char allocated; // 1 if the block is allocated, 0 if it is free
 } block_header;
 
 typedef struct {
-  size_t size;
+  size_t size; // the number of bytes in a block
   int filler;
 } block_footer;
 
+/* This program uses 2 separate linked lists: 1) free blocks  2) chunks */
 typedef struct list_node {
   struct list_node* next;
   struct list_node* prev;
 } list_node;
 
 typedef struct {
-  size_t size;
+  size_t size; // the number of bytes in a chunk. Includes all overhead
   int filler;
 } chunk_info;
 
@@ -49,9 +57,8 @@ static size_t pages_in_use;
 static size_t chunks_in_use;
 static size_t INITIAL_PAGES ;
 static size_t MAX_PAGES_IN_CHUNK;
-// Only unmap a chunk when there are at least this many
+// Only unmap a chunk when there are at least this many pages in use
 static size_t CHUNK_UNMAP_THRESHOLD;
-
 
 /* always use 16-byte alignment */
 #define ALIGNMENT 16
@@ -87,7 +94,6 @@ static void reset_vars();
 static void replace_list_node(list_node* new_node, list_node* old_node);
 static void remove_list_node(list_node* node);
 static void add_to_free_list(list_node* bp);
-static void check_heap_correctness(char* first_bp);
 
 /*
  * mm_init - initialize the malloc package.
@@ -104,17 +110,17 @@ int mm_init(void)
 }
 
 /*
- mm_malloc - Allocate a block by finding a free block with sufficient space.
+ mm_malloc - Allocate a block by finding the first free block with sufficient space.
  If no such free block can be found, requests additional page(s) from the OS
  via mem_map() and allocates a block from that. Returns a pointer to the
- beginning of the blocks payload.
+ beginning of the block's payload.
  */
 void *mm_malloc(size_t size)
 {
   size_t need_size = MAX(size, sizeof(list_node));
   size_t new_size = ALIGN(need_size + BLOCK_OVERHEAD);
   list_node* fp = first_fp;
-  list_node* sufficiently_large_fp = NULL; // For best-fit allocating
+  list_node* sufficiently_large_fp = NULL; // For first-fit allocating
 
   if(first_fp){
     while(1){
@@ -137,7 +143,6 @@ void *mm_malloc(size_t size)
   void* bp = set_new_chunk(new_size);
   set_allocated(bp, new_size);
 
-  //check_heap_correctness(first_bp);
   return bp;
 }
 
@@ -154,8 +159,6 @@ void mm_free(void* bp)
   // But not if it's the only chunk we've allocated so far.
   if(pages_in_use > CHUNK_UNMAP_THRESHOLD)
     possibly_unmap_chunk(fp);
-
-  //check_heap_correctness(first_bp);
 }
 
 /* Merges adjacent free blocks together. Updates the explicit free
@@ -220,7 +223,7 @@ static void set_allocated(void* bp, size_t size){
 }
 
 /* Gets more pages from the kernel. Tries to minimize the number of
-  future calls to this method by asking the kernel for twice the number
+  future calls to this method by possibly asking the kernel for twice the number
   of pages than are currently in use. Returns a pointer to the first free block
   of the chunk */
 static void* set_new_chunk(size_t size){
@@ -395,61 +398,4 @@ static void add_to_free_list(list_node* fp){
   }
   fp->prev = NULL;
   first_fp = fp;
-}
-
-
-/* Internal test to ensure correct allocation */
-static void check_heap_correctness(char* first_bp){
-  if(GET_SIZE(HDRP(first_bp)) == 0)
-    exit(-1);
-
-  // Ensure there are no contiguous free blocks
-  void* bp = first_bp;
-  while(GET_SIZE(HDRP(bp)) != 0){
-    char curr_alloc = GET_ALLOC(HDRP(bp));
-    if(curr_alloc == 0 && GET_ALLOC(HDRP(NEXT_BLKP(bp))) == 0)
-      exit(-2);
-    bp = NEXT_BLKP(bp);
-  }
-
-  // Ensure all free blocks are also in free list
-  bp = first_bp;
-  size_t implicit_free_count = 0;
-  size_t explicit_free_count = 0;
-  while(GET_SIZE(HDRP(NEXT_BLKP(bp))) != 0){
-    if(GET_ALLOC(HDRP(bp)) == 0)
-      implicit_free_count++;
-    bp = NEXT_BLKP(bp);
-  }
-  if(GET_ALLOC(HDRP(bp)) == 0)
-    implicit_free_count++;
-
-  list_node* fp  = first_fp;
-  if(fp != NULL){
-    explicit_free_count++;
-    while(fp->next != NULL){
-      explicit_free_count++;
-      fp = fp->next;
-    }
-  }
-
-  if(explicit_free_count != implicit_free_count)
-    exit(-3);
-
-  // Ensure every block in free list is free, and is valid with size greater than 0
-   fp = first_fp;
-  while(fp != NULL){
-    if(GET_ALLOC(HDRP(fp)) != 0 || GET_SIZE(HDRP(fp)) <= 0)
-      exit(-4);
-    fp = fp->next;
-  }
-
-  // Ensure no allocated blocks overlap
-  bp = first_bp;
-  while(1){
-    if(bp + GET_SIZE(bp) != NEXT_BLKP(bp))
-      exit(-5);
-    if(GET_SIZE(NEXT_BLKP(bp)) == 0)
-      break;
-  }
 }
